@@ -1,6 +1,5 @@
 conda create -y -n renee python=3.8
 
-source activate
 conda activate renee
 
 conda install cuda -c nvidia/label/cuda-11.8.0 -y
@@ -27,3 +26,5 @@ cd apex
 git checkout 5c9625cfed681d4c96a0ca4406ea6b1b08c78164
 pip install -v --disable-pip-version-check --no-cache-dir --global-option="--cpp_ext" --global-option="--cuda_ext" ./
 cd ..
+
+sed -i '2c\string_classes = str' /home/gordon1109/.miniconda3/envs/renee/lib/python3.8/site-packages/apex/amp/_initialize.py
