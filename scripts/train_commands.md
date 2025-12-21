@@ -32,19 +32,20 @@ Amazon-670K:
 ```bash
 python main.py \
 --epochs 70 \
---batch-size 16 \
+--batch-size 256 \
+--accum 1 \
 --lr1 0.01 \
 --lr2 4e-5 \
 --warmup 10000 \
---data-dir xc/Datasets/Amazon-670K \
+--data-dir Datasets/Amazon-670K \
 --maxlen 512 \
 --tf sentence-transformers/all-roberta-large-v1 \
 --dropout 0.8 \
 --wd1 0.001 \
 --wd2 0.001 \
 --noloss \
---fp16xfc \
 --compile
+# --fp16xfc \
 ```
 
 AmazonTitles-3M
@@ -111,11 +112,11 @@ LF-AmazonTitles-131K
 ```bash
 python main.py \
 --epochs 100 \
---batch-size 32 \
+--batch-size 512 \
 --lr1 0.05 \
 --lr2 1e-5 \
 --warmup 5000 \
---data-dir xc/Datasets/LF-AmazonTitles-131K-Aug \
+--data-dir Datasets/LF-AmazonTitles-131K-Aug \
 --maxlen 32 \
 --tf sentence-transformers/msmarco-distilbert-base-v4 \
 --dropout 0.85 \
@@ -205,11 +206,11 @@ LF-Amazon-131K | NGAME-initialisation
 ```bash
 python main.py \
 --epochs 100 \
---batch-size 32 \
+--batch-size 512 \
 --lr1 0.05 \
 --lr2 1e-5 \
 --warmup 5000 \
---data-dir xc/Datasets/LF-Amazon-131K-Aug \
+--data-dir Datasets/LF-Amazon-131K-Aug \
 --maxlen 128 \
 --tf sentence-transformers/msmarco-distilbert-base-v4 \
 --dropout 0.85 \

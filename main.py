@@ -59,9 +59,11 @@ def start(device, ngpus_per_node, args):
   else : A = 0.55; B = 1.5
   inv_prop = xc_metrics.compute_inv_propesity(trn_X_Y, A, B)
 
-  temp = np.fromfile('%s/tst_filter_labels.txt'%(DATA_DIR), sep=' ').astype(int)
-  temp = temp.reshape(-1, 2).T
-  tst_filter_mat = sp.coo_matrix((np.ones(temp.shape[1]), (temp[0], temp[1])), (tst_shape_0,tst_shape_1)).tocsr()
+  tst_filter_mat = None
+  if os.path.exists('%s/tst_filter_labels.txt'%(DATA_DIR)):
+    temp = np.fromfile('%s/tst_filter_labels.txt'%(DATA_DIR), sep=' ').astype(int)
+    temp = temp.reshape(-1, 2).T
+    tst_filter_mat = sp.coo_matrix((np.ones(temp.shape[1]), (temp[0], temp[1])), (tst_shape_0,tst_shape_1)).tocsr()
 
 
   if 'roberta' in args.tf: tokenizer_type = 'roberta-base'
@@ -80,11 +82,6 @@ def start(device, ngpus_per_node, args):
           print("Rounding numy to",padded_numy)
 
   numy_per_gpu = padded_numy // args.world_size
-  if (numy_per_gpu % 16 != 0):
-        padded_numy = args.world_size*16*((numy_per_gpu + 15)//16)
-        numy_per_gpu = padded_numy // args.world_size
-        if my_rank == 0:
-          print("Rounding numy further to",padded_numy)
   if my_rank == 0:
     print("Final numy_per_gpu: ",numy_per_gpu)
 
@@ -151,7 +148,7 @@ def start(device, ngpus_per_node, args):
     modules = [encoder, nn.Dropout(args.dropout)] 
     args.bottleneck_dims = encoder.transformer.config.hidden_size
 
-  model = GenericModel(my_rank, args, trn_X_Y.shape[1], numy_per_gpu, args.batch_size, modules, device=device, name=expname, out_dir=f'{results_dir}/{dataset}/{expname}')
+  model = GenericModel(my_rank, args, trn_X_Y.shape[1], numy_per_gpu, args.batch_size, modules, device=device, name=expname, out_dir=f'{results_dir}{dataset}/{expname}')
   if args.compile:
       model.embed[0] = torch.compile(model.embed[0])
   model = model.cuda()
@@ -202,9 +199,9 @@ def main():
                         help='number of epochs to train (default: 50)')
     parser.add_argument('--expname', type=str, default='renee-exp', metavar='N',
                         help='Name of exp')
-    parser.add_argument('--device', type=int, default=None, metavar='N',
+    parser.add_argument('--device', type=int, default=0, metavar='N',
                         help='Single device training (default: None)')
-    parser.add_argument('--dist-url', default='tcp://localhost:23456', type=str,
+    parser.add_argument('--dist-url', default="", type=str,
                     help='url used to set up distributed training; replace localhost with IP of rank 0 for multinode training')
     parser.add_argument('--rank', type=int, default=0, metavar='N',
                         help='Rank of node used in training (default: 0, should range from 0 to world-size -1)')

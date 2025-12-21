@@ -32,6 +32,9 @@ except ModuleNotFoundError:
     pass
 
 
+import warnings
+warnings.filterwarnings("ignore")
+
 #from plasma_utils import *
 def noop(func):
     return func
@@ -42,7 +45,7 @@ def printacc(score_mat, K = 5, X_Y = None, disp = True, inv_prop_ = None):
     if X_Y is None: X_Y = tst_X_Y
     if inv_prop_ is None: inv_prop_ = inv_prop
 
-    acc = xc_metrics.Metrics(X_Y.tocsr().astype(np.bool), inv_prop_)
+    acc = xc_metrics.Metrics(X_Y.tocsr().astype(np.bool_), inv_prop_)
     metrics = np.array(acc.eval(score_mat, K))*100
     df = pd.DataFrame(metrics)
 

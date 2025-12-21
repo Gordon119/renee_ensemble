@@ -38,21 +38,21 @@ os.makedirs(aug_folder, exist_ok=True)
 # transfer the train and test files
 command_to_run = f'cp {str(os.path.join(args.data_dir, "trn_X_Y.txt"))} {str(aug_folder)}'
 print("✅ Now running:", command_to_run)
-subprocess.Popen(command_to_run, shell=True)
+subprocess.run(command_to_run, check=True,shell=True)
 command_to_run = f'cp {str(os.path.join(args.data_dir, "trn_filter_labels.txt"))} {str(aug_folder)}'
 print("✅ Now running:", command_to_run)
-subprocess.Popen(command_to_run, shell=True)
+subprocess.run(command_to_run, check=True,shell=True)
 
 command_to_run = f'cp {str(os.path.join(args.data_dir, "tst_X_Y.txt"))} {str(aug_folder)}'
 print("✅ Now running:", command_to_run)
-subprocess.Popen(command_to_run, shell=True)
+subprocess.run(command_to_run, check=True,shell=True)
 command_to_run = f'cp {str(os.path.join(args.data_dir, "tst_filter_labels.txt"))} {str(aug_folder)}'
 print("✅ Now running:", command_to_run)
-subprocess.Popen(command_to_run, shell=True)
+subprocess.run(command_to_run, check=True,shell=True)
 
 command_to_run = f'cp -r {str(os.path.join(args.data_dir, args.tokenization_folder))} {str(aug_folder)}'
 print("✅ Now running:", command_to_run)
-subprocess.Popen(command_to_run, shell=True)
+subprocess.run(command_to_run, check=True,shell=True)
 
 
 # add identity matrix in trn_X_Y

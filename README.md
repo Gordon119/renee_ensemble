@@ -42,18 +42,18 @@ A dataset folder should have the following directory structure. Below we show it
 To tokenize the raw train, test and label texts, we can use the following command (change the path of the dataset folder accordingly):
 ```bash
 python -W ignore -u utils/CreateTokenizedFiles.py \
---data-dir xc/Datasets/LF-AmazonTitles-131K \
---max-length 32 \
---tokenizer-type bert-base-uncased \
+--data-dir Datasets/Amazon-670K \
+--max-length 512 \
+--tokenizer-type roberta-base \
 --tokenize-label-texts
 ```
 
 To create a dataset having label-text augmentation, we can use the following command:
 ```bash
 python utils/CreateAugData.py \
---data-dir xc/Datasets/LF-AmazonTitles-131K \
---tokenization-folder bert-base-uncased-32 \
---max-len 32
+--data-dir Datasets/LF-Amazon-131K \
+--tokenization-folder bert-base-uncased-128 \
+--max-len 128
 ```
 
 Above command will create a folder named `xc/Datasets/LF-AmazonTitles-131K-Aug`, now we can refer to this dataset directory in our training script to train with label-text augmentation.

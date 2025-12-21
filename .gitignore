@@ -1,3 +1,5 @@
+ngame_pretrained_models/
+Datasets/
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
