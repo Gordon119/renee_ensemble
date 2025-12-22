@@ -1,6 +1,7 @@
-conda create -y -n renee python=3.8
+# conda create -y -n renee python=3.8
 
-conda activate renee
+# source activate
+# conda activate renee
 
 conda install cuda -c nvidia/label/cuda-11.8.0 -y
 
