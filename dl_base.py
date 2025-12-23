@@ -367,21 +367,6 @@ class GenericModel(nn.Sequential):
                   training_steps += 1
                 self.count += 1
 
-                if max_grad_norm > 0: 
-                    self.scaler.unscale_(self.tf_optimizer)
-                    torch.nn.utils.clip_grad_norm_(loss_model.parameters(), max_grad_norm)
-
-                # finish update with tf_optimizer
-                self.scaler.step(self.tf_optimizer)
-                self.tf_optimizer.zero_grad()
-                self.scaler.update()
-
-                self.xfc_scheduler.step()
-                self.tf_scheduler.step()
-
-                #training_steps += 1
-                del batch_data
-            
             if self.compute_loss:
               mean_loss = total_loss.item()/training_steps
             else:
@@ -394,7 +379,32 @@ class GenericModel(nn.Sequential):
                 score = evaluator(loss_model, epoch, mean_loss, self.out_dir, self.name)
             if self.checkpoint_resume != '':
                 self.checkpoint(mean_loss)
-                    
+            
+            grad_accum_counter += 1
+            del batch_data
+            if grad_accum_counter % self.accum == 0:
+                grad_accum_counter = 0 # reset counter
+
+                # 1. Update Transformer (TF) weights
+                if max_grad_norm > 0: 
+                    self.scaler.unscale_(self.tf_optimizer)
+                    torch.nn.utils.clip_grad_norm_(loss_model.parameters(), max_grad_norm)
+
+                self.scaler.step(self.tf_optimizer)
+                self.tf_optimizer.zero_grad()
+                self.scaler.update()
+
+                # 2. Update XFC weights
+                self.xfc_optimizer.step()
+                self.xfc_weight.grad = None # ONLY reset here after the step
+
+                # 3. Step Schedulers
+                self.xfc_scheduler.step()
+                self.tf_scheduler.step()
+                training_steps += 1
+            else:
+                pass
+
     @staticmethod
     def _get_scheduler(optimizer, warmup_steps: int, t_total: int):
         return transformers.get_cosine_schedule_with_warmup(optimizer, num_warmup_steps=warmup_steps, num_training_steps=t_total)
