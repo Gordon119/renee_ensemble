@@ -4,7 +4,7 @@ AmazonTitles-670K:
 ```bash
 python main.py \
 --epochs 60 \
---batch-size 16 \
+--batch-size 256 \
 --lr1 0.001 \
 --lr2 5e-5 \
 --warmup 10000 \
