@@ -255,6 +255,7 @@ class GenericModel(nn.Sequential):
             print('No checkpoint file to resume. Starting training from scratch', flush=True)
 
         start_epoch =  self.epoch
+        grad_accum_counter = 0
         loss = torch.tensor(0.0,device=self._target_device)
         total_loss = torch.tensor(0.0,device=self._target_device)
         for epoch in trange(start_epoch, epochs, desc="Epoch", initial=start_epoch, total=epochs):
