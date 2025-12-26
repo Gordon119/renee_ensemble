@@ -15,6 +15,7 @@ python main.py \
 --wd1 0.001 \
 --wd2 0.001 \
 --noloss \
+--expname test \
 --compile
 ```
 

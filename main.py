@@ -249,6 +249,9 @@ def main():
                         help='Path to NGAME pretrained encoder as initialization point for trainings')
     parser.add_argument('--compile', action='store_true', default=False,
                         help='Compile model using PyTorch 2.0')
+    parser.add_argument('--mem-profile', action='store_true', default=False)  # enable peak CUDA memory logging (epoch 0 + first N steps)
+    parser.add_argument('--mem-profile-steps', type=int, default=1)  # number of initial steps in epoch 0 to record per-step peak
+    parser.add_argument('--mem-profile-out', type=str, default='')  # CSV path (default: <out_dir>/mem_profile.csv)
     args = parser.parse_args()
 
     print(args)

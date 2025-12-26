@@ -22,6 +22,8 @@ import pandas as pd
 import torch.distributed as dist
 import datetime
 import os.path
+import csv
+import time
 #import numba as nb
 try:
     import xfc_gemm_cuda
@@ -157,6 +159,7 @@ class GenericModel(nn.Sequential):
             device = "cuda" if torch.cuda.is_available() else "cpu"
 
         self.rank = rank
+        self.args = args
         self.world_size = args.world_size
         self.scaler = torch.cuda.amp.GradScaler(enabled=not args.fp32encoder, init_scale =2**12 if args.fp16xfc else 2**16) 
         self.numy = numy
@@ -193,6 +196,23 @@ class GenericModel(nn.Sequential):
         self.name = name
         self.out_dir = out_dir
         os.makedirs(self.out_dir, exist_ok=True)
+
+    @staticmethod
+    def _bytes_to_mib(x_bytes: int) -> float:
+        return float(x_bytes) / (1024.0 * 1024.0)
+
+    def _cuda_mem_snapshot(self) -> Dict[str, float]:  
+    #capture current + peak CUDA memory (MiB)
+        if not torch.cuda.is_available():
+            return {}
+        dev = self._target_device
+        torch.cuda.synchronize(dev)  # ensure kernels finished before reading counters
+        return {
+            'alloc_mib': self._bytes_to_mib(torch.cuda.memory_allocated(dev)),
+            'reserved_mib': self._bytes_to_mib(torch.cuda.memory_reserved(dev)),
+            'max_alloc_mib': self._bytes_to_mib(torch.cuda.max_memory_allocated(dev)),
+            'max_reserved_mib': self._bytes_to_mib(torch.cuda.max_memory_reserved(dev)),
+        }
         
 
     @profile
@@ -213,6 +233,12 @@ class GenericModel(nn.Sequential):
 
 
         loss_model.to(self._target_device)
+
+        mem_profile = bool(getattr(self.args, 'mem_profile', False)) and torch.cuda.is_available()
+        mem_profile_steps = int(getattr(self.args, 'mem_profile_steps', 1))
+        mem_profile_out = str(getattr(self.args, 'mem_profile_out', '') or '')
+        if mem_profile and mem_profile_out == '':
+            mem_profile_out = os.path.join(self.out_dir, 'mem_profile.csv')
 
         self.count = 0
         steps_per_epoch = len(dataloader)
@@ -264,8 +290,20 @@ class GenericModel(nn.Sequential):
             loss_model.zero_grad()
             loss_model.train()
 
+            step_peaks = []
+            epoch0_baseline = {}
+            if mem_profile and epoch == start_epoch: 
+            # profile only the first epoch we execute
+                torch.cuda.synchronize(self._target_device)
+                torch.cuda.reset_peak_memory_stats(self._target_device)
+                epoch0_baseline = self._cuda_mem_snapshot()
+
             grad_accum = 0
-            for _ in trange(steps_per_epoch, desc="Iteration", smoothing=0.05, disable=(self.rank != 0)):
+            for step_idx in trange(steps_per_epoch, desc="Iteration", smoothing=0.05, disable=(self.rank != 0)):
+                step_profile_this_iter = mem_profile and (epoch == start_epoch) and (step_idx < mem_profile_steps)
+                if step_profile_this_iter:
+                    torch.cuda.synchronize(self._target_device)
+                    torch.cuda.reset_peak_memory_stats(self._target_device)
                 try:
                     batch_data = next(data_iterator)
                 except StopIteration:
@@ -295,6 +333,8 @@ class GenericModel(nn.Sequential):
                      self.xfc_scheduler.step()
                      self.tf_scheduler.step()
                      training_steps += 1
+                    if step_profile_this_iter:
+                      step_peaks.append(self._cuda_mem_snapshot())  # MOD
                     continue
 
                 # Optimized Implementation 
@@ -381,6 +421,9 @@ class GenericModel(nn.Sequential):
 
                 #training_steps += 1
                 del batch_data
+
+                if step_profile_this_iter:
+                    step_peaks.append(self._cuda_mem_snapshot())
             
             if self.compute_loss:
               mean_loss = total_loss.item()/training_steps
@@ -394,6 +437,45 @@ class GenericModel(nn.Sequential):
                 score = evaluator(loss_model, epoch, mean_loss, self.out_dir, self.name)
             if self.checkpoint_resume != '':
                 self.checkpoint(mean_loss)
+
+            if mem_profile and epoch == start_epoch:
+                epoch0_peak = self._cuda_mem_snapshot()
+
+                if self.rank == 0:
+                    gpu_name = torch.cuda.get_device_name(self._target_device) if torch.cuda.is_available() else 'cpu'
+                    ts = time.strftime('%Y-%m-%d %H:%M:%S')
+                    param_count_total = int(sum(p.numel() for p in loss_model.parameters()))
+                    param_count_trainable = int(sum(p.numel() for p in loss_model.parameters() if p.requires_grad))
+
+                    step_max_allocs = ';'.join([f"{s.get('max_alloc_mib', 0.0):.2f}" for s in step_peaks])
+                    step_max_reserv = ';'.join([f"{s.get('max_reserved_mib', 0.0):.2f}" for s in step_peaks])
+
+                    row = {
+                        'timestamp': ts,
+                        'expname': getattr(self.args, 'expname', ''),
+                        'tf': getattr(self.args, 'tf', ''),
+                        'maxlen': getattr(self.args, 'maxlen', ''),  
+                        'batch_size': int(getattr(self.args, 'batch_size', 0)),
+                        'accum': getattr(self.args, 'accum', ''),
+                        'param_count_total': param_count_total,
+                        'param_count_trainable': param_count_trainable,
+                        'gpu': gpu_name,
+                        'epoch0_baseline_alloc_mib': f"{epoch0_baseline.get('alloc_mib', 0.0):.2f}",
+                        'epoch0_baseline_reserved_mib': f"{epoch0_baseline.get('reserved_mib', 0.0):.2f}",
+                        'epoch0_peak_alloc_mib': f"{epoch0_peak.get('max_alloc_mib', 0.0):.2f}",
+                        'epoch0_peak_reserved_mib': f"{epoch0_peak.get('max_reserved_mib', 0.0):.2f}",
+                        'step_peak_alloc_mib_list': step_max_allocs,
+                        'step_peak_reserved_mib_list': step_max_reserv,
+                    }
+
+                    write_header = not os.path.exists(mem_profile_out)
+                    os.makedirs(os.path.dirname(mem_profile_out), exist_ok=True)
+                    with open(mem_profile_out, 'a', newline='') as f:
+                        w = csv.DictWriter(f, fieldnames=list(row.keys()))
+                        if write_header:
+                            w.writeheader()
+                        w.writerow(row)
+                    print(f"[mem_profile] wrote: {mem_profile_out}")
                     
     @staticmethod
     def _get_scheduler(optimizer, warmup_steps: int, t_total: int):
