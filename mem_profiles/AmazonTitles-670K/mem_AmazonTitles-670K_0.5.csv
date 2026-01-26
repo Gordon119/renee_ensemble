@@ -1,0 +1,2 @@
+timestamp,expname,tf,maxlen,batch_size,accum,param_count_total,param_count_trainable,gpu,epoch0_baseline_alloc_mib,epoch0_baseline_reserved_mib,epoch0_peak_alloc_mib,epoch0_peak_reserved_mib,step_peak_alloc_mib_list,step_peak_reserved_mib_list
+2026-01-19 08:23:46,gpu_ram,sentence-transformers/all-roberta-large-v1,32,256,1,697396224,697396224,NVIDIA GeForce RTX 4090,2660.37,2678.00,21711.33,22262.00,17699.39,19486.00

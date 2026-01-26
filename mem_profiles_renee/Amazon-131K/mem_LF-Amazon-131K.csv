@@ -1,0 +1,2 @@
+timestamp,expname,tf,maxlen,batch_size,accum,param_count_total,param_count_trainable,gpu,epoch0_baseline_alloc_mib,epoch0_baseline_reserved_mib,epoch0_peak_alloc_mib,epoch0_peak_reserved_mib,step_peak_alloc_mib_list,step_peak_reserved_mib_list
+2025-12-26 04:31:06,gpu_ram,sentence-transformers/msmarco-distilbert-base-v4,128,512,1,167026944,167026944,NVIDIA GeForce RTX 4090,896.24,916.00,13273.44,13826.00,13010.41,13248.00

@@ -1,0 +1,3 @@
+timestamp,expname,tf,maxlen,batch_size,accum,param_count_total,param_count_trainable,gpu,epoch0_baseline_alloc_mib,epoch0_baseline_reserved_mib,epoch0_peak_alloc_mib,epoch0_peak_reserved_mib,step_peak_alloc_mib_list,step_peak_reserved_mib_list
+2026-01-14 17:42:53,gpu_ram,sentence-transformers/all-roberta-large-v1,32,256,1,422927360,422927360,NVIDIA GeForce RTX 4090,1680.60,1698.00,12852.49,13186.00,10141.20,10210.00
+2026-01-14 18:09:33,gpu_ram,sentence-transformers/all-roberta-large-v1,32,256,1,422927360,422927360,NVIDIA GeForce RTX 4090,1680.60,1698.00,12852.49,13186.00,10141.20,10210.00

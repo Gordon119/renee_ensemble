@@ -1,0 +1,14 @@
+model,ratio,epoch0_peak_reserved_gib
+Amazon-131K/distilbert/512/128,0.1,21.251953125
+Amazon-131K/distilbert/512/128,0.3,21.533203125
+Amazon-131K/distilbert/512/128,0.5,21.90625
+Amazon-131K/distilbert/512/128,0.7,22.208984375
+Amazon-131K/distilbert/512/128,0.9,22.361328125
+AmazonTitles-131K/distilbert/512/32,0.1,5.97265625
+AmazonTitles-131K/distilbert/512/32,0.3,6.853515625
+AmazonTitles-131K/distilbert/512/32,0.5,6.8984375
+AmazonTitles-131K/distilbert/512/32,0.7,7.50390625
+AmazonTitles-131K/distilbert/512/32,0.9,7.91796875
+AmazonTitles-670K/roberta-large/256/32,0.1,17.82421875
+AmazonTitles-670K/roberta-large/256/32,0.3,19.669921875
+AmazonTitles-670K/roberta-large/256/32,0.5,21.740234375
