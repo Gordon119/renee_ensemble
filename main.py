@@ -5,6 +5,7 @@ import numpy as np
 import scipy.sparse as sp
 import os
 import argparse
+import json
 import torch.multiprocessing as mp
 from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.distributed as dist
@@ -40,31 +41,95 @@ def start(device, ngpus_per_node, args):
   results_dir = f'./Results/Bert-XC/'
   expname = args.expname
   os.makedirs(results_dir, exist_ok=True)
+  out_dir = f'{results_dir}{dataset}/{expname}'
+  os.makedirs(out_dir, exist_ok=True)
 
   device = f'cuda:{nb_id}'
   torch.cuda.set_device(device)
 
-
   # Load Data
   DATA_DIR = args.data_dir
   trn_X_Y = data_utils.read_sparse_file(f'{DATA_DIR}/trn_X_Y.txt')
-  tst_X_Y = data_utils.read_sparse_file(f'{DATA_DIR}/tst_X_Y.txt')
-  tst_shape_0, tst_shape_1 = tst_X_Y.shape[0], tst_X_Y.shape[1]
-  if my_rank > 0: # only rank 0 does eval 
+  trn_num_points_total, numy_full = trn_X_Y.shape[0], trn_X_Y.shape[1]
+
+  if my_rank == 0:
+      tst_X_Y = data_utils.read_sparse_file(f'{DATA_DIR}/tst_X_Y.txt')
+      tst_num_points_total, tst_numy_full = tst_X_Y.shape[0], tst_X_Y.shape[1]
+  else:
       tst_X_Y = None
+      tst_num_points_total, tst_numy_full = 0, 0
 
+  if args.world_size > 1:
+      obj_list = [(tst_num_points_total, tst_numy_full)] if my_rank == 0 else [None]
+      dist.broadcast_object_list(obj_list, src=0)
+      tst_num_points_total, tst_numy_full = obj_list[0]
 
+  label_indices = None
+  trn_point_indices = None
+  tst_point_indices = None
+
+  if args.sample_rate is not None and args.sample_rate > 0:
+      if args.sample_rate <= 0:
+          raise ValueError("--sample-rate must be > 0")
+      indices_path = os.path.join(out_dir, "label_indices.json")
+      if args.infer and os.path.exists(indices_path):
+          label_indices = json.load(open(indices_path, "r"))
+      else:
+          label_indices = subsample_indices(numy_full, args.sample_rate)
+          if my_rank == 0:
+              json.dump(label_indices, open(indices_path, "w"))
+
+      if args.world_size > 1:
+          obj_list = [label_indices] if my_rank == 0 else [None]
+          dist.broadcast_object_list(obj_list, src=0)
+          label_indices = obj_list[0]
+
+      # Subsample label space (columns)
+      trn_X_Y = trn_X_Y.tocsc()[:, label_indices].tocsr()
+      if my_rank == 0:
+          tst_X_Y = tst_X_Y.tocsc()[:, label_indices].tocsr()
+
+      # Drop instances with no labels after subsampling (rows)
+      trn_X_Y, trn_point_indices = filter_instances_without_labels(trn_X_Y)
+      if my_rank == 0:
+          tst_X_Y, tst_point_indices = filter_instances_without_labels(tst_X_Y)
+
+      if args.world_size > 1:
+          obj_list = [tst_point_indices] if my_rank == 0 else [None]
+          dist.broadcast_object_list(obj_list, src=0)  # MOD
+          tst_point_indices = obj_list[0]  # MOD
+
+  # Compute inv propensity on (possibly) subsampled training labels  # MOD
   if "Amazon" in dataset: A = 0.6; B = 2.6
   elif "Wiki" in dataset: A = 0.5; B = 0.4
   else : A = 0.55; B = 1.5
   inv_prop = xc_metrics.compute_inv_propesity(trn_X_Y, A, B)
 
   tst_filter_mat = None
-  if os.path.exists('%s/tst_filter_labels.txt'%(DATA_DIR)):
-    temp = np.fromfile('%s/tst_filter_labels.txt'%(DATA_DIR), sep=' ').astype(int)
-    temp = temp.reshape(-1, 2).T
-    tst_filter_mat = sp.coo_matrix((np.ones(temp.shape[1]), (temp[0], temp[1])), (tst_shape_0,tst_shape_1)).tocsr()
+# Disable Label Aug for now
+#   if my_rank == 0 and os.path.exists('%s/tst_filter_labels.txt'%(DATA_DIR)):  # MOD
+#     temp = np.fromfile('%s/tst_filter_labels.txt'%(DATA_DIR), sep=' ').astype(int)  # MOD
+#     temp = temp.reshape(-1, 2).T  # MOD
 
+#     if label_indices is None:  # MOD: original label space
+#       tst_filter_mat = sp.coo_matrix((np.ones(temp.shape[1]), (temp[0], temp[1])), (tst_num_points_total, tst_numy_full)).tocsr()  # MOD
+#     else:  # MOD: remap rows/cols into subsampled space
+#       # Map original label ids -> subsampled label ids  # MOD
+#       label_map = -np.ones(numy_full, dtype=np.int64)  # MOD
+#       label_map[np.asarray(label_indices, dtype=np.int64)] = np.arange(len(label_indices), dtype=np.int64)  # MOD
+
+#       # Map original test row ids -> filtered test row ids  # MOD
+#       row_map = -np.ones(tst_num_points_total, dtype=np.int64)  # MOD
+#       kept_rows = np.asarray(tst_point_indices, dtype=np.int64)  # MOD
+#       row_map[kept_rows] = np.arange(len(kept_rows), dtype=np.int64)  # MOD
+
+#       mapped_rows = row_map[temp[0]]  # MOD
+#       mapped_cols = label_map[temp[1]]  # MOD
+#       mask = (mapped_rows >= 0) & (mapped_cols >= 0)  # MOD
+#       mapped_rows = mapped_rows[mask]  # MOD
+#       mapped_cols = mapped_cols[mask]  # MOD
+
+#       tst_filter_mat = sp.coo_matrix((np.ones(mapped_rows.shape[0]), (mapped_rows, mapped_cols)), (len(kept_rows), len(label_indices))).tocsr()  # MOD
 
   if 'roberta' in args.tf: tokenizer_type = 'roberta-base'
   elif 'bert' in args.tf: tokenizer_type = 'bert-base-uncased'
@@ -86,14 +151,14 @@ def start(device, ngpus_per_node, args):
     print("Final numy_per_gpu: ",numy_per_gpu)
 
   #Dataloaders
-  num_points = trn_X_Y.shape[0]
+  num_points = trn_num_points_total
   
   start_label = my_rank*numy_per_gpu
   end_label = (my_rank+1)*numy_per_gpu
   # restrict the train dataset to only the labels that this rank is responsible for
   trn_X_Y_rank = trn_X_Y.tocsc()[:,start_label:end_label].tocsr()
-  trn_dataset = PreTokBertDataset(f'{DATA_DIR}/{tokenizer_type}-{args.maxlen}', trn_X_Y_rank, num_points, args.maxlen, doc_type='trn')
-  tst_dataset = PreTokBertDataset(f'{DATA_DIR}/{tokenizer_type}-{args.maxlen}', tst_X_Y, tst_shape_0, args.maxlen, doc_type='tst')
+  trn_dataset = PreTokBertDataset(f'{DATA_DIR}/{tokenizer_type}-{args.maxlen}', trn_X_Y_rank, num_points, args.maxlen, doc_type='trn', point_indices=trn_point_indices)
+  tst_dataset = PreTokBertDataset(f'{DATA_DIR}/{tokenizer_type}-{args.maxlen}', tst_X_Y, tst_num_points_total, args.maxlen, doc_type='tst', point_indices=tst_point_indices)
 
   gbsz = args.batch_size*args.world_size # everyone gets all labels
   num_workers = 4
@@ -170,6 +235,9 @@ def start(device, ngpus_per_node, args):
   if args.infer:
       model.load()
       evaluator(trn_loss,out_dir=None, name=model.name)
+      if args.save_logits:
+          dumper = EnsembleLogitsDumper(sparse=args.logits_sparse, K=args.logits_topk, dirname=args.logits_dirname)
+          dumper(trn_loss, model, tst_loader, out_dir=out_dir, name='test')
   else:
       model.fit(trn_loader, trn_loss, 
           xfc_optimizer_class = apex.optimizers.FusedSGD,
@@ -181,6 +249,10 @@ def start(device, ngpus_per_node, args):
           evaluation_epochs=5,
 #           max_grad_norm=5.0)
           )
+      if args.save_logits:
+        dumper = EnsembleLogitsDumper(sparse=args.logits_sparse, K=args.logits_topk, dirname=args.logits_dirname)
+        dumper(trn_loss, model, tst_loader, out_dir=out_dir, name='test')
+            
 
 def main():
     # Training settings
@@ -233,6 +305,17 @@ def main():
                         help='DIR to checkpoint each epoch/resume from most recent checkpoint')
     parser.add_argument('--infer', action='store_true', default=False,
                         help='Perform inference of pre-trained model')
+    
+    parser.add_argument('--sample-rate', type=float, default=0.0, metavar='SR',
+                    help='Randomly subsample label columns by rate and drop instances with no remaining labels (default: 0.0 disables)')
+    parser.add_argument('--save-logits', action='store_true', default=False,
+                    help='Dump per-batch logits/predictions to NPZ files (torch_trainer.test_ensemble-style)')
+    parser.add_argument('--logits-sparse', action='store_true', default=False,
+                    help='If set (or if world-size>1), dump top-k indices/values instead of full logits')
+    parser.add_argument('--logits-topk', type=int, default=100, metavar='K',
+                    help='Top-k to dump when --logits-sparse is enabled (default: 100)')
+    parser.add_argument('--logits-dirname', type=str, default='preds', metavar='N',
+                    help='Subdirectory under out_dir to write logits (default: preds)')
     parser.add_argument('--warmup', type=int, default=140000, metavar='N',
                         help='number of steps for warmup (default: 140000)')
     parser.add_argument('--accum', type=int, default=1, metavar='N',

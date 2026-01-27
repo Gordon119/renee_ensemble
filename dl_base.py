@@ -801,6 +801,91 @@ class FullPredictor():
         else:
             return None
 
+class EnsembleLogitsDumper():
+    """Dump per-batch logits/predictions in NPZ files (torch_trainer.test_ensemble-style)."""
+    def __init__(self, sparse: bool = False, K: int = 100, dirname: str = "preds"):
+        self.sparse = sparse
+        self.K = K
+        self.dirname = dirname
+
+    def __call__(self, loss_model, model: "GenericModel", dataloader: DataLoader, out_dir: str, name: str = "test"):
+        sparse = self.sparse
+        K = int(min(max(1, self.K), model.numy))
+
+        pred_dir = os.path.join(out_dir, self.dirname)
+        if model.rank == 0:
+            os.makedirs(pred_dir, exist_ok=True)
+
+        model.eval()
+        xfcz = model.xfc_batch_size
+
+        with torch.no_grad():
+            for step, batch_data in enumerate(tqdm(dataloader, desc=f"Dumping logits ({name})", disable=(model.rank != 0))):
+                batch_data = model.batch_to_device(batch_data, model._target_device)
+                bsz = int(batch_data["batch_size"])
+
+                with torch.cuda.amp.autocast(enabled=model.fp16encoder):
+                    embed_out = model.embed(batch_data["xfts"])
+                embed_out = loss_model.gather_embed(embed_out, batch_data)
+
+                # Allocate per-batch buffers
+                if sparse:
+                    batch_top_vals = torch.empty((bsz, K), dtype=torch.float16 if model.fp16xfc else torch.float32, device=model._target_device)
+                    batch_top_inds = torch.empty((bsz, K), dtype=torch.long, device=model._target_device)
+                else:
+                    batch_scores = np.empty((bsz, model.numy), dtype=np.float32)
+
+                start_bs = 0
+                end_bs = xfcz
+                if end_bs > bsz:
+                    end_bs = bsz
+                cur_xfcz = end_bs - start_bs
+
+                while end_bs <= bsz:
+                    if model.default_impl:
+                        out = loss_model.xfc_forward(embed_out[start_bs:end_bs, :])
+                    else:
+                        out = model.outsoft[0:cur_xfcz, :]
+                        loss_model.xfc_forward(embed_out[start_bs:end_bs, :], out)
+
+                    if sparse:
+                        top_data, top_inds = torch.topk(out, K, dim=1)
+
+                        top_inds[top_inds >= model.numy] = model.numy - 1
+
+                        batch_top_vals[start_bs:end_bs, :] = top_data
+                        batch_top_inds[start_bs:end_bs, :] = top_inds
+                    else:
+                        batch_scores[start_bs:end_bs, :] = out[:, :model.numy].float().detach().cpu().numpy()
+
+                    start_bs = end_bs
+                    end_bs += xfcz
+                    if start_bs < bsz and end_bs > bsz:
+                        end_bs = bsz
+                    cur_xfcz = end_bs - start_bs
+
+                
+                if model.rank == 0:
+                    save_path = os.path.join(pred_dir, f"preds_{step}.npz")
+                    if sparse:
+                        np.savez_compressed(
+                            save_path,
+                            indices=batch_top_inds.detach().cpu().numpy().astype(np.uint32),
+                            values=batch_top_vals.detach().cpu().numpy().astype(np.float32),
+                            shape=(bsz, model.numy),
+                        )
+                    else:
+                        np.savez_compressed(
+                            save_path,
+                            values=batch_scores.astype(np.float32),
+                            shape=batch_scores.shape,
+                        )
+
+        if model.rank == 0:
+            mode = f"top-{K}" if sparse else "full"
+            print(f"[EnsembleLogitsDumper] Saved {mode} predictions to {pred_dir}", flush=True)
+
+
 class PrecEvaluator():
     def __init__(self, model: GenericModel, dataloader, predictor, filter_mat = None, K=5, metric='P', inv_prop=-1):
         self.K = K
@@ -864,12 +949,33 @@ class PrecEvaluator():
         return score
 
 
+def subsample_indices(n_labels: int, sample_rate: float):
+    """Randomly subsample label indices (sorted) consistent with torch_trainer.py."""
+    n_select = int(n_labels * sample_rate)
+    if n_select == 0:
+        raise ValueError(f"Sample rate {sample_rate} results in 0 labels selected")
+    if n_select > n_labels:
+        n_select = n_labels
+    indices = np.random.choice(n_labels, n_select, replace=False)
+    return np.sort(indices).tolist()
+
+
+def filter_instances_without_labels(X_Y):
+    """Filter rows with 0 nnz labels. Returns (filtered_X_Y, kept_row_indices)."""
+    if X_Y is None:
+        return None, None
+    row_nnz = X_Y.getnnz(axis=1)
+    keep_rows = np.where(row_nnz > 0)[0]
+    return X_Y[keep_rows], keep_rows
+
+
 class PreTokBertDataset(torch.utils.data.Dataset):
-    def __init__(self, tokenization_folder, X_Y, num_points, max_len, doc_type='trn', iter_mode='pointwise'):
+    def __init__(self, tokenization_folder, X_Y, num_points, max_len, doc_type='trn', iter_mode='pointwise', point_indices=None):  # MOD: add point_indices mapping
         self.num_points = num_points
         self.max_len = max_len
         self.iter_mode = iter_mode
         self.labels = X_Y
+        self.point_indices = None if point_indices is None else np.asarray(point_indices)
         self.start =  True
         self.tokenization_folder = tokenization_folder
         self.doc_type = doc_type
@@ -890,13 +996,16 @@ class PreTokBertDataset(torch.utils.data.Dataset):
                               mode='r', shape=(self.num_points, self.max_len), dtype=np.int64)
            self.X_am = np.memmap(f"{self.tokenization_folder}/{self.doc_type}_doc_attention_mask.dat",
                                mode='r', shape=(self.num_points, self.max_len), dtype=np.int64)
+        if self.point_indices is not None:
+            indices = np.asarray(indices)
+            indices = self.point_indices[indices]
         if source == 'point':
             return bert_fts_batch_to_tensor(self.X_ii[indices], self.X_am[indices])
         if source == 'label':
             return bert_fts_batch_to_tensor(self.Y_ii[indices], self.Y_am[indices])
    
     def __len__(self):
-        return self.num_points
+        return len(self.point_indices) if self.point_indices is not None else self.num_points
 
 
 # changed to handle hybrid data-model parallel architecture
