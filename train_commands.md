@@ -94,7 +94,7 @@ python main.py \
 
 ## Label Features Datasets
 
-LF-AmazonTitles-131K
+LF-AmazonTitles-131K (AUG)
 ```bash
 python main.py \
 --epochs 100 \
@@ -111,6 +111,24 @@ python main.py \
 --use-ngame-encoder ngame_pretrained_models/LF-AmazonTitles-131K-Aug/state_dict.pt \
 --compile
 ```
+
+LF-AmazonTitles-131K
+```bash
+python main.py \
+--epochs 100 \
+--batch-size 512 \
+--lr1 0.05 \
+--lr2 1e-4 \
+--warmup 5000 \
+--data-dir Datasets/LF-AmazonTitles-131K \
+--maxlen 32 \
+--tf sentence-transformers/msmarco-distilbert-base-v4 \
+--dropout 0.75 \
+--wd1 1e-4 \
+--noloss \
+--compile
+```
+
 
 LF-Wikipedia-500K
 ```bash

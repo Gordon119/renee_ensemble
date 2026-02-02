@@ -107,29 +107,29 @@ def start(device, ngpus_per_node, args):
 
   tst_filter_mat = None
 # Disable Label Aug for now
-#   if my_rank == 0 and os.path.exists('%s/tst_filter_labels.txt'%(DATA_DIR)):  # MOD
-#     temp = np.fromfile('%s/tst_filter_labels.txt'%(DATA_DIR), sep=' ').astype(int)  # MOD
-#     temp = temp.reshape(-1, 2).T  # MOD
+  if my_rank == 0 and os.path.exists('%s/tst_filter_labels.txt'%(DATA_DIR)):  # MOD
+      temp = np.fromfile('%s/tst_filter_labels.txt'%(DATA_DIR), sep=' ').astype(int)  # MOD
+      temp = temp.reshape(-1, 2).T  # MOD
 
-#     if label_indices is None:  # MOD: original label space
-#       tst_filter_mat = sp.coo_matrix((np.ones(temp.shape[1]), (temp[0], temp[1])), (tst_num_points_total, tst_numy_full)).tocsr()  # MOD
-#     else:  # MOD: remap rows/cols into subsampled space
+      if label_indices is None:  # MOD: original label space
+        tst_filter_mat = sp.coo_matrix((np.ones(temp.shape[1]), (temp[0], temp[1])), (tst_num_points_total, tst_numy_full)).tocsr()  # MOD
+      else:  # MOD: remap rows/cols into subsampled space
 #       # Map original label ids -> subsampled label ids  # MOD
-#       label_map = -np.ones(numy_full, dtype=np.int64)  # MOD
-#       label_map[np.asarray(label_indices, dtype=np.int64)] = np.arange(len(label_indices), dtype=np.int64)  # MOD
+        label_map = -np.ones(numy_full, dtype=np.int64)  # MOD
+        label_map[np.asarray(label_indices, dtype=np.int64)] = np.arange(len(label_indices), dtype=np.int64)  # MOD
 
 #       # Map original test row ids -> filtered test row ids  # MOD
-#       row_map = -np.ones(tst_num_points_total, dtype=np.int64)  # MOD
-#       kept_rows = np.asarray(tst_point_indices, dtype=np.int64)  # MOD
-#       row_map[kept_rows] = np.arange(len(kept_rows), dtype=np.int64)  # MOD
+        row_map = -np.ones(tst_num_points_total, dtype=np.int64)  # MOD
+        kept_rows = np.asarray(tst_point_indices, dtype=np.int64)  # MOD
+        row_map[kept_rows] = np.arange(len(kept_rows), dtype=np.int64)  # MOD
 
-#       mapped_rows = row_map[temp[0]]  # MOD
-#       mapped_cols = label_map[temp[1]]  # MOD
-#       mask = (mapped_rows >= 0) & (mapped_cols >= 0)  # MOD
-#       mapped_rows = mapped_rows[mask]  # MOD
-#       mapped_cols = mapped_cols[mask]  # MOD
+        mapped_rows = row_map[temp[0]]  # MOD
+        mapped_cols = label_map[temp[1]]  # MOD
+        mask = (mapped_rows >= 0) & (mapped_cols >= 0)  # MOD
+        mapped_rows = mapped_rows[mask]  # MOD
+        mapped_cols = mapped_cols[mask]  # MOD
 
-#       tst_filter_mat = sp.coo_matrix((np.ones(mapped_rows.shape[0]), (mapped_rows, mapped_cols)), (len(kept_rows), len(label_indices))).tocsr()  # MOD
+        tst_filter_mat = sp.coo_matrix((np.ones(mapped_rows.shape[0]), (mapped_rows, mapped_cols)), (len(kept_rows), len(label_indices))).tocsr()  # MOD
 
   if 'roberta' in args.tf: tokenizer_type = 'roberta-base'
   elif 'bert' in args.tf: tokenizer_type = 'bert-base-uncased'
