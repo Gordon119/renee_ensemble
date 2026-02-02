@@ -1,6 +1,7 @@
 import argparse
 import json
 import os
+from tqdm import tqdm
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
@@ -76,8 +77,8 @@ class EnsembleNPZPredictor:
                 print(f"[warn] Missing preds/ for model {mid}: {preds_dir}")
                 continue
             self._preds_dirs[mid] = preds_dir
-            label_path = os.path.exists(os.path.join(mdir, "label_indices.json"))
-            self._label_indices[mid] = None if not label_path else np.asarray(json.load(open(label_path, "r")), dtype=np.int32) 
+            label_path = os.path.join(mdir, "label_indices.json")
+            self._label_indices[mid] = None if not os.path.exists(label_path) else np.asarray(json.load(open(label_path, "r")), dtype=np.int32) 
 
         if len(self._preds_dirs) == 0:
             raise ValueError(f"No valid model preds/ found under: {results_dir}")
@@ -112,10 +113,10 @@ class EnsembleNPZPredictor:
         preds_cnt = np.zeros((bsz, num_labels), dtype=np.int16)
 
         for mid, preds_dir in self._preds_dirs.items():
-            loaded = self._load_batch_pred(preds_dir, batch_idx)
-            if loaded is None:
-                continue
-            values = scipy.special.expit(values)
+            local_indices, values = self._load_batch_pred(preds_dir, batch_idx)
+
+            if self.apply_sigmoid:
+                values = scipy.special.expit(values)
 
             label_idx = self._label_indices[mid]
 
@@ -149,7 +150,9 @@ class EnsembleNPZPredictor:
         indptr = np.arange(0, datalen * self.K + 1, self.K, dtype=np.int64)
 
         ctr = 0
-        for batch_idx, batch in enumerate(dataloader):
+        for batch_idx, batch in enumerate(
+            tqdm(dataloader, total=len(dataloader), desc="Ensembling batches")
+        ):
             bsz = int(batch["batch_size"])
 
             top_val, top_idx = self._ensemble_one_batch_dense(
@@ -186,7 +189,7 @@ def parse_args() -> argparse.Namespace:
         help="Directory like Results/Bert-XC/<DATASET_NAME> containing per-model subdirs 0/,1/,...",
     )
     parser.add_argument("--min-model", type=int, default=0, help="Minimum model id (inclusive)")
-    parser.add_argument("--max-model", type=int, default=100, help="Maximum model id (inclusive)")
+    parser.add_argument("--max-model", type=int, default=99, help="Maximum model id (inclusive)")
 
     # Eval
     parser.add_argument("--k", type=int, default=5, help="Evaluate at K (e.g., 5 for P@5)")
@@ -217,8 +220,7 @@ def main() -> None:
         results_dir=args.results_dir,
         model_ids=model_ids,
         K=100,
-        apply_sigmoid=args.apply_sigmoid,
-        verbose=True,
+        apply_sigmoid=True,
     )
 
     dataset = DummyIndexDataset(tst_X_Y)
